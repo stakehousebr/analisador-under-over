@@ -92,28 +92,28 @@ class AnalisadorApostasUnderOver:
         
         if divergencia_percent >= 15:
             status = "🔥 OPORTUNIDADE ALTA"
-            explicacao = "Odd atual muito ACIMA da projetada"
+            explicacao = "Odd atual muito ACIMA da projetada - Correção forte esperada!"
             recomendacao = "✅ EXCELENTE momento para entrada Under"
             risco = "Baixo"
         elif divergencia_percent >= 8:
             status = "💰 OPORTUNIDADE MÉDIA"
-            explicacao = "Odd atual ACIMA da projetada"
+            explicacao = "Odd atual ACIMA da projetada - Correção moderada esperada"
             recomendacao = "✅ Bom momento para entrada Under"
             risco = "Médio"
         elif divergencia_percent >= -8:
             status = "⚖️ EQUILIBRADO"
-            explicacao = "Odd atual próxima da projetada"
-            recomendacao = "⚠️ Entrada neutra"
+            explicacao = "Odd atual próxima da projetada - Mercado alinhado"
+            recomendacao = "⚠️ Entrada neutra - Risco/benefício equilibrado"
             risco = "Médio"
         elif divergencia_percent >= -15:
             status = "⚠️ CUIDADO"
-            explicacao = "Odd atual ABAIXO da projetada"
-            recomendacao = "❌ Entrada Under arriscada"
+            explicacao = "Odd atual ABAIXO da projetada - Pouco potencial de queda"
+            recomendacao = "❌ Entrada Under arriscada - Pouco retorno esperado"
             risco = "Alto"
         else:
             status = "🚨 RISCO ALTO"
-            explicacao = "Odd atual muito ABAIXO da projetada"
-            recomendacao = "❌ EVITAR entrada Under"
+            explicacao = "Odd atual muito ABAIXO da projetada - Mercado pode estar travado"
+            recomendacao = "❌ EVITAR entrada Under - Exposição desnecessária"
             risco = "Muito Alto"
         
         return {
@@ -123,6 +123,97 @@ class AnalisadorApostasUnderOver:
             'recomendacao': recomendacao,
             'risco': risco
         }
+    
+    def calcular_taxa_queda(self, under_inicial, under_atual, minutos):
+        if minutos == 0:
+            return 0
+        return (under_inicial - under_atual) / (under_inicial * minutos)
+    
+    def classificar_ritmo(self, taxa_queda):
+        if taxa_queda >= 0.015:
+            return "DESACELERADA ⏰", "Ritmo lento, partida conservadora"
+        else:
+            return "ACELERADA ⚡", "Ritmo rápido, partida ofensiva"
+    
+    def analisar_melhor_entrada_under(self, curva):
+        melhores_entradas = []
+        
+        for i in range(14, 65, 5):
+            if i + 10 < len(curva):
+                odd_entrada = curva[i]['under']
+                odd_10min_depois = curva[i + 10]['under']
+                queda_percent = ((odd_entrada - odd_10min_depois) / odd_entrada) * 100
+                
+                if 2.5 <= odd_entrada <= 35.0 and queda_percent >= 8:
+                    melhores_entradas.append({
+                        'minuto': i + 1,
+                        'odd_entrada': odd_entrada,
+                        'odd_apos_10min': odd_10min_depois,
+                        'queda_percent': round(queda_percent, 1),
+                        'potencial_lucro': f"{queda_percent:.1f}%"
+                    })
+        
+        return sorted(melhores_entradas, key=lambda x: x['queda_percent'], reverse=True)[:3]
+    
+    def analisar_melhor_entrada_over(self, curva):
+        melhores_entradas = []
+        
+        for i in range(59, 85, 3):
+            if i < len(curva):
+                odd_over = curva[i]['over']
+                under_atual = curva[i]['under']
+                under_final = curva[89]['under']
+                
+                over_final = self.calcular_over_baseado_no_under(under_final)
+                
+                if over_final > odd_over:
+                    risco_correcao = ((over_final - odd_over) / odd_over) * 100
+                else:
+                    risco_correcao = 0
+                
+                if odd_over >= 1.1 and risco_correcao <= 60:
+                    melhores_entradas.append({
+                        'minuto': i + 1,
+                        'odd_entrada': odd_over,
+                        'under_atual': under_atual,
+                        'risco_correcao': round(risco_correcao, 1),
+                        'estabilidade': 'Alta' if risco_correcao < 20 else 'Média'
+                    })
+        
+        return sorted(melhores_entradas, key=lambda x: x['risco_correcao'])[:3]
+    
+    def projetar_restante_equilibrio(self, under_inicial, under_atual, minuto_atual, placar):
+        under_final = self.calcular_under_final_esperado(under_inicial)
+        
+        pontos_restantes = {}
+        pontos_restantes[minuto_atual] = under_atual
+        
+        fator_ajuste_atual = under_atual / self.interpolar_ponto(minuto_atual, self.pontos_equilibrio)
+        
+        for minuto in range(minuto_atual + 1, 91):
+            if minuto == 90:
+                pontos_restantes[minuto] = under_final
+            else:
+                valor_ref = self.interpolar_ponto(minuto, self.pontos_equilibrio)
+                if minuto <= minuto_atual + 15:
+                    pontos_restantes[minuto] = valor_ref * fator_ajuste_atual
+                else:
+                    peso_ajuste = (90 - minuto) / (90 - minuto_atual - 15)
+                    pontos_restantes[minuto] = valor_ref * (1 + (fator_ajuste_atual - 1) * peso_ajuste * 0.5)
+        
+        projecao = []
+        
+        for i in range(minuto_atual + 1, 91):
+            under_projetado = self.interpolar_ponto(i, pontos_restantes)
+            over_projetado = self.calcular_over_baseado_no_under(under_projetado)
+            
+            projecao.append({
+                'minuto': i,
+                'under': round(under_projetado, 2),
+                'over': round(over_projetado, 3)
+            })
+        
+        return projecao
 
 # Interface Streamlit
 st.title("🎯 Analisador Profissional Under/Over v3.0")
@@ -158,7 +249,7 @@ if modo == "📈 Projeção Completa":
             st.metric("Under Final", f"{curva[89]['under']}")
             st.metric("Over Final", f"{curva[89]['over']}")
         
-        # Gráfico
+        # Gráficos
         df_curva = pd.DataFrame(curva)
         
         col1, col2 = st.columns(2)
@@ -171,21 +262,40 @@ if modo == "📈 Projeção Completa":
             st.subheader("📈 Evolução Over")
             st.line_chart(df_curva.set_index('minuto')['over'])
         
-        # Tabela
-        st.subheader("⏰ Marcos Importantes")
-        marcos = [14, 29, 44, 59, 74, 89]
-        dados_marcos = []
+        # Estratégias de entrada
+        st.subheader("🎯 Estratégias de Entrada")
         
-        for i in marcos:
-            ponto = curva[i]
-            dados_marcos.append({
-                'Minuto': ponto['minuto'],
-                'Under': ponto['under'],
-                'Over': round(ponto['over'], 3)
-            })
+        col1, col2 = st.columns(2)
         
-        df_marcos = pd.DataFrame(dados_marcos)
-        st.dataframe(df_marcos, use_container_width=True)
+        with col1:
+            st.write("💎 **Top 3 Entradas Under:**")
+            melhores_under = analisador.analisar_melhor_entrada_under(curva)
+            if melhores_under:
+                for i, entrada in enumerate(melhores_under, 1):
+                    st.write(f"{i}. Min {entrada['minuto']}: {entrada['odd_entrada']} → {entrada['odd_apos_10min']} ({entrada['potencial_lucro']})")
+            else:
+                st.write("❌ Nenhuma entrada Under favorável")
+        
+        with col2:
+            st.write("🚀 **Top 3 Entradas Over:**")
+            melhores_over = analisador.analisar_melhor_entrada_over(curva)
+            if melhores_over:
+                for i, entrada in enumerate(melhores_over, 1):
+                    st.write(f"{i}. Min {entrada['minuto']}: {entrada['odd_entrada']:.3f} (Risco: {entrada['risco_correcao']}%)")
+            else:
+                st.write("❌ Nenhuma entrada Over favorável")
+        
+        # Tabela completa minuto a minuto
+        st.subheader("📊 Tabela Completa Minuto a Minuto")
+        
+        # Criar tabela formatada
+        df_display = df_curva.copy()
+        df_display['Minuto'] = df_display['minuto']
+        df_display['Under'] = df_display['under']
+        df_display['Over'] = df_display['over'].round(3)
+        df_display = df_display[['Minuto', 'Under', 'Over']]
+        
+        st.dataframe(df_display, use_container_width=True, height=400)
 
 else:
     st.sidebar.subheader("📋 Dados do Jogo")
@@ -216,6 +326,7 @@ else:
         # Análise
         curva = analisador.gerar_curva_equilibrio_90min(under_inicial_jogo, over_inicial_jogo)
         under_esperado = curva[minuto_atual - 1]['under']
+        over_esperado = curva[minuto_atual - 1]['over']
         
         divergencia = analisador.analisar_divergencia(under_atual, under_esperado, minuto_atual)
         
@@ -233,6 +344,21 @@ else:
             st.write(f"**Explicação:** {divergencia['explicacao']}")
             st.write(f"**Recomendação:** {divergencia['recomendacao']}")
             st.write(f"**Risco:** {divergencia['risco']}")
+        
+        # Análise de ritmo
+        taxa_queda = analisador.calcular_taxa_queda(under_inicial_jogo, under_atual, minuto_atual)
+        ritmo, descricao = analisador.classificar_ritmo(taxa_queda)
+        
+        st.subheader("📊 Análise de Ritmo")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Taxa de Queda", f"{taxa_queda:.4f}/min")
+            st.metric("Perfil", ritmo)
+        
+        with col2:
+            st.write(f"**Descrição:** {descricao}")
         
         # Projeção final
         under_final = analisador.calcular_under_final_esperado(under_inicial_jogo)
@@ -261,6 +387,35 @@ else:
             
             st.metric("Potencial Under", potencial)
             st.metric("Queda Restante", f"{queda_restante:.1f}%")
+        
+        # Projeção restante
+        st.subheader("📊 Projeção Restante")
+        
+        projecao = analisador.projetar_restante_equilibrio(under_inicial_jogo, under_atual, minuto_atual, placar_atual)
+        
+        if projecao:
+            df_projecao = pd.DataFrame(projecao)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Gráfico da Projeção Restante:**")
+                st.line_chart(df_projecao.set_index('minuto')[['under']])
+            
+            with col2:
+                st.write("**Evolução Over:**")
+                st.line_chart(df_projecao.set_index('minuto')[['over']])
+            
+            # Tabela restante minuto a minuto
+            st.subheader(f"📋 Tabela Restante - Minuto {minuto_atual + 1} ao 90")
+            
+            df_display = df_projecao.copy()
+            df_display['Minuto'] = df_display['minuto']
+            df_display['Under'] = df_display['under']
+            df_display['Over'] = df_display['over'].round(3)
+            df_display = df_display[['Minuto', 'Under', 'Over']]
+            
+            st.dataframe(df_display, use_container_width=True, height=400)
 
 # Rodapé
 st.sidebar.markdown("---")
