@@ -12,35 +12,24 @@ st.set_page_config(
 
 class AnalisadorApostasUnderOver:
     def __init__(self):
-        # Pontos de referência para curva padrão (Under ~39)
-        self.pontos_referencia = {
-            1: 1.0,      # 100% do valor inicial
-            15: 0.67,    # 67% do valor inicial  
-            30: 0.36,    # 36% do valor inicial
-            45: 0.23,    # 23% do valor inicial
-            46: 0.22,    # Início 2º tempo
-            60: 0.15,    # 15% do valor inicial
-            75: 0.08,    # 8% do valor inicial
-            85: 0.05,    # 5% do valor inicial
-            90: 0.04     # 4% do valor inicial (final)
-        }
+        pass
     
     def calcular_under_final_esperado(self, under_inicial):
-        """Cálculo mais conservador do Under final"""
+        """Cálculo mais equilibrado do Under final"""
         if under_inicial >= 50:
             return max(1.50, under_inicial * 0.035)
         elif under_inicial >= 30:
-            return max(1.40, under_inicial * 0.045)
+            return max(1.40, under_inicial * 0.045) 
         elif under_inicial >= 20:
             return max(1.30, under_inicial * 0.055)
         elif under_inicial >= 15:
             return max(1.25, under_inicial * 0.070)
         elif under_inicial >= 10:
-            return max(1.20, under_inicial * 0.100)
+            return max(1.20, under_inicial * 0.110)
         elif under_inicial >= 7:
-            return max(1.15, under_inicial * 0.140)
+            return max(1.15, under_inicial * 0.150)  # 7 × 0.15 = 1.05, limitado a 1.15
         elif under_inicial >= 5:
-            return max(1.10, under_inicial * 0.180)
+            return max(1.10, under_inicial * 0.200)
         elif under_inicial >= 3:
             return max(1.05, under_inicial * 0.300)
         else:
@@ -61,36 +50,81 @@ class AnalisadorApostasUnderOver:
         except:
             return 15.0
     
-    def gerar_curva_monotonica(self, under_inicial, under_final):
-        """NOVA: Gera curva estritamente decrescente"""
-        curva_pontos = {}
+    def criar_curva_natural(self, under_inicial, under_final):
+        """NOVA: Cria curva natural baseada em função matemática"""
         
-        # Calcula valores para cada ponto de referência
-        for minuto, percentual in self.pontos_referencia.items():
-            if minuto == 90:
-                valor = under_final
-            else:
-                # Interpolação entre inicial e final
-                valor_bruto = under_inicial * percentual
-                # Garante que nunca seja menor que o final
-                valor = max(valor_bruto, under_final + (90 - minuto) * 0.001)
-            
-            curva_pontos[minuto] = valor
+        # Calcula a diferença total que precisa ser distribuída
+        diferenca_total = under_inicial - under_final
         
-        # CRÍTICO: Garante monotonicidade decrescente
-        minutos_ordenados = sorted(curva_pontos.keys())
+        # Define velocidades de queda por período
+        velocidades = {
+            'periodo_1_15': 0.25,    # 25% da queda total nos primeiros 15 min
+            'periodo_15_30': 0.20,   # 20% da queda nos próximos 15 min
+            'periodo_30_45': 0.20,   # 20% da queda nos próximos 15 min
+            'periodo_45_60': 0.15,   # 15% da queda nos próximos 15 min
+            'periodo_60_75': 0.12,   # 12% da queda nos próximos 15 min
+            'periodo_75_90': 0.08    # 8% da queda nos últimos 15 min
+        }
+        
+        # Calcula pontos de controle
+        pontos = {}
+        valor_atual = under_inicial
+        
+        # Minuto 1
+        pontos[1] = under_inicial
+        
+        # Minuto 15
+        queda_15 = diferenca_total * velocidades['periodo_1_15']
+        valor_atual -= queda_15
+        pontos[15] = max(valor_atual, under_final)
+        
+        # Minuto 30
+        queda_30 = diferenca_total * velocidades['periodo_15_30']
+        valor_atual -= queda_30
+        pontos[30] = max(valor_atual, under_final)
+        
+        # Minuto 45
+        queda_45 = diferenca_total * velocidades['periodo_30_45']
+        valor_atual -= queda_45
+        pontos[45] = max(valor_atual, under_final)
+        
+        # Minuto 46 (pequeno boost no início do 2º tempo)
+        boost_2tempo = (pontos[45] - under_final) * 0.95  # Pequena aceleração
+        pontos[46] = max(pontos[45] - (pontos[45] - under_final) * 0.05, under_final)
+        
+        # Minuto 60
+        queda_60 = diferenca_total * velocidades['periodo_45_60']
+        valor_atual -= queda_60
+        pontos[60] = max(valor_atual, under_final)
+        
+        # Minuto 75
+        queda_75 = diferenca_total * velocidades['periodo_60_75']
+        valor_atual -= queda_75
+        pontos[75] = max(valor_atual, under_final)
+        
+        # Minuto 85 (penúltimo ponto)
+        queda_85 = diferenca_total * velocidades['periodo_75_90'] * 0.7  # 70% da queda final
+        valor_atual -= queda_85
+        pontos[85] = max(valor_atual, under_final)
+        
+        # Minuto 90 (final)
+        pontos[90] = under_final
+        
+        # VERIFICAÇÃO: Garante progressão decrescente
+        minutos_ordenados = sorted(pontos.keys())
         for i in range(1, len(minutos_ordenados)):
-            minuto_atual = minutos_ordenados[i]
-            minuto_anterior = minutos_ordenados[i-1]
+            min_atual = minutos_ordenados[i]
+            min_anterior = minutos_ordenados[i-1]
             
-            # Se o valor atual for maior que o anterior, ajusta
-            if curva_pontos[minuto_atual] > curva_pontos[minuto_anterior]:
-                curva_pontos[minuto_atual] = curva_pontos[minuto_anterior] * 0.99
+            if pontos[min_atual] >= pontos[min_anterior]:
+                # Corrige forçando uma pequena queda
+                pontos[min_atual] = pontos[min_anterior] * 0.98
+                pontos[min_atual] = max(pontos[min_atual], under_final)
         
-        return curva_pontos
+        return pontos
     
     def interpolar_suave(self, minuto, pontos_curva):
-        """Interpolação que mantém monotonicidade"""
+        """Interpolação suave que mantém progressão natural"""
         if minuto in pontos_curva:
             return pontos_curva[minuto]
         
@@ -111,21 +145,31 @@ class AnalisadorApostasUnderOver:
                 val1 = pontos_curva[min1]
                 val2 = pontos_curva[min2]
                 
-                # Interpolação linear
+                # Interpolação com curva suave (não linear)
                 fator = (minuto - min1) / (min2 - min1)
-                valor = val1 + (val2 - val1) * fator
                 
-                # GARANTIA: Valor interpolado não pode ser maior que val1
+                # Aplica suavização exponencial para evitar quedas muito lineares
+                fator_suave = 1 - math.exp(-2 * fator)  # Curva exponencial suave
+                
+                valor = val1 + (val2 - val1) * fator_suave
+                
+                # Garante que não suba
                 return min(valor, val1)
         
         return pontos_curva[minutos_ordenados[-1]]
     
     def gerar_curva_equilibrio_90min(self, under_inicial, over_inicial):
-        """Gera curva completamente robusta"""
+        """Gera curva natural e equilibrada"""
         under_final = self.calcular_under_final_esperado(under_inicial)
         
-        # Gera pontos de controle monotônicos
-        pontos_curva = self.gerar_curva_monotonica(under_inicial, under_final)
+        # Cria pontos de controle naturais
+        pontos_curva = self.criar_curva_natural(under_inicial, under_final)
+        
+        # Debug: Mostra pontos de controle
+        if st.sidebar.checkbox("🔍 Mostrar Pontos de Controle", False):
+            st.sidebar.write("**Pontos de Controle:**")
+            for min_key, valor in sorted(pontos_curva.items()):
+                st.sidebar.write(f"Min {min_key}: {valor:.2f}")
         
         # Gera curva completa minuto a minuto
         curva = []
@@ -134,9 +178,10 @@ class AnalisadorApostasUnderOver:
         for minuto in range(1, 91):
             under_atual = self.interpolar_suave(minuto, pontos_curva)
             
-            # DUPLA VERIFICAÇÃO: Garante que nunca sobe
+            # Dupla verificação: garante progressão decrescente
             under_atual = min(under_atual, valor_anterior)
-            under_atual = max(under_atual, 1.01)  # Mínimo absoluto
+            under_atual = max(under_atual, under_final)  # Nunca abaixo do final
+            under_atual = max(under_atual, 1.01)         # Mínimo absoluto
             
             over_atual = self.calcular_over_baseado_no_under(under_atual)
             
@@ -202,18 +247,42 @@ class AnalisadorApostasUnderOver:
         else:
             return "ACELERADA ⚡", "Ritmo rápido, partida ofensiva"
     
+    def analisar_distribuicao_queda(self, curva):
+        """NOVA: Analisa como a queda está distribuída"""
+        under_inicial = curva[0]['under']
+        
+        # Análise por períodos
+        periodos = {
+            '1º Tempo (1-45)': (curva[0]['under'], curva[44]['under']),
+            '2º Tempo (46-90)': (curva[45]['under'], curva[89]['under']),
+            'Primeiro Terço (1-30)': (curva[0]['under'], curva[29]['under']),
+            'Segundo Terço (31-60)': (curva[30]['under'], curva[59]['under']),
+            'Terceiro Terço (61-90)': (curva[60]['under'], curva[89]['under'])
+        }
+        
+        análise = {}
+        for periodo, (valor_inicio, valor_fim) in periodos.items():
+            queda = valor_inicio - valor_fim
+            percentual = (queda / under_inicial) * 100
+            análise[periodo] = {
+                'queda_absoluta': round(queda, 2),
+                'queda_percentual': round(percentual, 1)
+            }
+        
+        return análise
+    
     def analisar_melhor_entrada_under(self, curva):
         melhores_entradas = []
         
-        for i in range(10, 60, 5):  # Analisa a cada 5 minutos
+        for i in range(10, 70, 5):  # Analisa a cada 5 minutos até o minuto 70
             if i + 15 < len(curva):  # Janela de 15 minutos
                 odd_entrada = curva[i]['under']
                 odd_depois = curva[i + 15]['under']
                 
-                if odd_entrada > 1.20 and odd_depois > 1.05:
+                if odd_entrada > 1.30 and odd_depois > 1.10:
                     queda_percent = ((odd_entrada - odd_depois) / odd_entrada) * 100
                     
-                    if queda_percent >= 10:  # Mínimo 10% de queda
+                    if queda_percent >= 8:  # Mínimo 8% de queda
                         melhores_entradas.append({
                             'minuto': i + 1,
                             'odd_entrada': odd_entrada,
@@ -227,15 +296,15 @@ class AnalisadorApostasUnderOver:
     def analisar_melhor_entrada_over(self, curva):
         melhores_entradas = []
         
-        for i in range(60, 85, 3):
+        for i in range(65, 85, 3):  # Foco nos últimos 25 minutos
             if i < len(curva):
                 odd_over = curva[i]['over']
                 
-                if 1.5 <= odd_over <= 10.0:  # Range razoável
+                if 1.8 <= odd_over <= 12.0:  # Range mais equilibrado
                     melhores_entradas.append({
                         'minuto': i + 1,
                         'odd_entrada': odd_over,
-                        'estabilidade': 'Alta' if odd_over <= 5.0 else 'Média'
+                        'estabilidade': 'Alta' if odd_over <= 6.0 else 'Média'
                     })
         
         return melhores_entradas[:3]
@@ -243,40 +312,38 @@ class AnalisadorApostasUnderOver:
     def projetar_restante_equilibrio(self, under_inicial, under_atual, minuto_atual, placar):
         under_final = self.calcular_under_final_esperado(under_inicial)
         
-        # Cria curva do minuto atual até o final
-        pontos_restantes = {}
-        pontos_restantes[minuto_atual] = under_atual
+        # Calcula quantos minutos restam
+        minutos_restantes = 90 - minuto_atual
+        diferenca_restante = under_atual - under_final
         
-        # Pontos intermediários até o final
-        for min_futuro in range(minuto_atual + 5, 91, 5):
-            if min_futuro == 90:
-                pontos_restantes[min_futuro] = under_final
-            else:
-                # Progressão linear decrescente
-                progresso = (min_futuro - minuto_atual) / (90 - minuto_atual)
-                valor = under_atual + (under_final - under_atual) * progresso
-                pontos_restantes[min_futuro] = max(valor, under_final)
+        # Taxa de queda constante para o restante
+        if minutos_restantes > 0:
+            taxa_queda_restante = diferenca_restante / minutos_restantes
+        else:
+            taxa_queda_restante = 0
         
-        pontos_restantes[90] = under_final
-        
-        # Gera projeção minuto a minuto
+        # Cria projeção minuto a minuto
         projecao = []
+        valor_atual = under_atual
+        
         for minuto in range(minuto_atual + 1, 91):
-            under_proj = self.interpolar_suave(minuto, pontos_restantes)
-            under_proj = max(under_proj, under_final)  # Nunca abaixo do final
-            over_proj = self.calcular_over_baseado_no_under(under_proj)
+            # Aplicar queda gradual
+            valor_atual -= taxa_queda_restante
+            valor_atual = max(valor_atual, under_final)  # Nunca abaixo do final
+            
+            over_proj = self.calcular_over_baseado_no_under(valor_atual)
             
             projecao.append({
                 'minuto': minuto,
-                'under': round(under_proj, 2),
+                'under': round(valor_atual, 2),
                 'over': round(over_proj, 3)
             })
         
         return projecao
 
 # Interface Streamlit
-st.title("🎯 Analisador Under/Over v4.0 - ROBUSTO")
-st.subheader("🔄 Curva Estritamente Decrescente")
+st.title("🎯 Analisador Under/Over v5.0 - NATURAL")
+st.subheader("📊 Curva Equilibrada e Realista")
 
 # Sidebar
 st.sidebar.header("⚙️ Configurações")
@@ -304,7 +371,7 @@ if modo == "📈 Projeção Completa":
         with col1:
             st.metric("Under Inicial", f"{under_inicial}")
             st.metric("Over Inicial", f"{over_inicial}")
-            st.success("✅ **Garantia:** Curva SEMPRE decrescente")
+            st.success("✅ **Curva Natural:** Queda equilibrada")
         
         curva = analisador.gerar_curva_equilibrio_90min(under_inicial, over_inicial)
         
@@ -312,14 +379,42 @@ if modo == "📈 Projeção Completa":
             st.metric("Under Final", f"{curva[89]['under']}")
             st.metric("Over Final", f"{curva[89]['over']}")
             
-            # Verificação de consistência
-            under_min85 = curva[84]['under']  # Minuto 85
-            under_final = curva[89]['under']   # Minuto 90
+            # Queda total
+            queda_total = under_inicial - curva[89]['under']
+            percentual_total = (queda_total / under_inicial) * 100
+            st.metric("Queda Total", f"{percentual_total:.1f}%")
+        
+        # Análise de distribuição da queda
+        st.subheader("📊 Distribuição da Queda por Períodos")
+        
+        distribuicao = analisador.analisar_distribuicao_queda(curva)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**⏰ Por Tempo:**")
+            for periodo in ['1º Tempo (1-45)', '2º Tempo (46-90)']:
+                dados = distribuicao[periodo]
+                st.write(f"• {periodo.split(' ')[0]} {periodo.split(' ')[1]}: {dados['queda_percentual']}%")
+        
+        with col2:
+            st.write("**📈 Por Terços:**")
+            for periodo in ['Primeiro Terço (1-30)', 'Segundo Terço (31-60)', 'Terceiro Terço (61-90)']:
+                dados = distribuicao[periodo]
+                terco = periodo.split(' ')[0]
+                st.write(f"• {terco}: {dados['queda_percentual']}%")
+        
+        with col3:
+            # Verificação de equilíbrio
+            primeiro_tempo = distribuicao['1º Tempo (1-45)']['queda_percentual']
+            segundo_tempo = distribuicao['2º Tempo (46-90)']['queda_percentual']
             
-            if under_final <= under_min85:
-                st.success("✅ Curva Consistente")
+            if segundo_tempo < 5:
+                st.warning("⚠️ 2º tempo muito lento")
+            elif abs(primeiro_tempo - segundo_tempo) < 15:
+                st.success("✅ Distribuição equilibrada")
             else:
-                st.error("❌ Erro na Curva")
+                st.info("ℹ️ Distribuição assimétrica")
         
         # Gráficos
         df_curva = pd.DataFrame(curva)
@@ -327,28 +422,38 @@ if modo == "📈 Projeção Completa":
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("📈 Evolução Under (Decrescente)")
+            st.subheader("📈 Evolução Under (Natural)")
             st.line_chart(df_curva.set_index('minuto')['under'])
         
         with col2:
             st.subheader("📈 Evolução Over")
             st.line_chart(df_curva.set_index('minuto')['over'])
         
-        # Verificação matemática
-        st.subheader("🔍 Verificação de Monotonicidade")
+        # Verificação de consistência
+        st.subheader("🔍 Verificação de Consistência")
         
-        # Verifica se a curva é sempre decrescente
         problemas = []
         for i in range(1, len(curva)):
             if curva[i]['under'] > curva[i-1]['under']:
                 problemas.append(f"Min {curva[i]['minuto']}: {curva[i]['under']} > {curva[i-1]['under']}")
         
         if problemas:
-            st.error(f"❌ **Problemas encontrados:** {len(problemas)}")
-            for problema in problemas[:5]:  # Mostra até 5 problemas
+            st.error(f"❌ **{len(problemas)} problemas encontrados**")
+            for problema in problemas[:3]:
                 st.write(f"• {problema}")
         else:
-            st.success("✅ **Perfeito!** Curva sempre decrescente ou estável")
+            st.success("✅ **Perfeito!** Curva sempre decrescente")
+        
+        # Análise de períodos críticos
+        under_60 = curva[59]['under']  # Minuto 60
+        under_90 = curva[89]['under']  # Minuto 90
+        queda_segundo_tempo = under_60 - under_90
+        percentual_segundo_tempo = (queda_segundo_tempo / under_60) * 100
+        
+        if percentual_segundo_tempo < 10:
+            st.warning("⚠️ **Atenção:** Segundo tempo com pouca movimentação")
+        else:
+            st.success(f"✅ **Segundo tempo ativo:** {percentual_segundo_tempo:.1f}% de queda")
         
         # Estratégias
         st.subheader("🎯 Estratégias de Entrada")
@@ -362,10 +467,10 @@ if modo == "📈 Projeção Completa":
                 for i, entrada in enumerate(melhores_under, 1):
                     st.write(f"{i}. Min {entrada['minuto']}: {entrada['odd_entrada']} → {entrada['odd_apos_15min']} ({entrada['potencial_lucro']})")
             else:
-                st.write("❌ Nenhuma oportunidade Under identificada")
+                st.write("❌ Nenhuma oportunidade Under clara")
         
         with col2:
-            st.write("🚀 **Entradas Over Seguras:**")
+            st.write("🚀 **Entradas Over Equilibradas:**")
             melhores_over = analisador.analisar_melhor_entrada_over(curva)
             if melhores_over:
                 for i, entrada in enumerate(melhores_over, 1):
@@ -390,9 +495,9 @@ else:
     placar_atual = st.sidebar.text_input("Placar Atual:", value="0x1")
     under_inicial_jogo = st.sidebar.number_input("Under Inicial:", value=7.0, min_value=1.01, max_value=999.0, step=0.1)
     over_inicial_jogo = st.sidebar.number_input("Over Inicial:", value=1.14, min_value=1.01, max_value=999.0, step=0.01)
-    under_atual = st.sidebar.number_input("Under Atual:", value=5.0, min_value=1.01, max_value=999.0, step=0.1)
-    over_atual = st.sidebar.number_input("Over Atual:", value=1.25, min_value=1.01, max_value=999.0, step=0.01)
-    minuto_atual = st.sidebar.slider("Minuto Atual:", min_value=1, max_value=89, value=20)
+    under_atual = st.sidebar.number_input("Under Atual:", value=4.5, min_value=1.01, max_value=999.0, step=0.1)
+    over_atual = st.sidebar.number_input("Over Atual:", value=1.28, min_value=1.01, max_value=999.0, step=0.01)
+    minuto_atual = st.sidebar.slider("Minuto Atual:", min_value=1, max_value=89, value=25)
     
     if st.sidebar.button("🚀 Executar Análise", type="primary"):
         analisador = AnalisadorApostasUnderOver()
@@ -462,11 +567,11 @@ else:
             st.metric("Over Final", f"{over_final:.3f}")
         
         with col3:
-            if queda_restante > 30:
+            if queda_restante > 35:
                 potencial = "🔥 MUITO ALTO"
-            elif queda_restante > 20:
+            elif queda_restante > 25:
                 potencial = "💰 ALTO"
-            elif queda_restante > 10:
+            elif queda_restante > 15:
                 potencial = "⚖️ MÉDIO"
             else:
                 potencial = "⚠️ BAIXO"
@@ -475,7 +580,7 @@ else:
             st.metric("Queda Restante", f"{max(queda_restante, 0):.1f}%")
         
         # Projeção restante
-        st.subheader("📊 Projeção Restante")
+        st.subheader("📊 Projeção Restante (Queda Gradual)")
         
         projecao = analisador.projetar_restante_equilibrio(under_inicial_jogo, under_atual, minuto_atual, placar_atual)
         
@@ -485,15 +590,15 @@ else:
             col1, col2 = st.columns(2)
             
             with col1:
-                st.write("**Under - Projeção Restante:**")
+                st.write("**Under - Projeção Natural:**")
                 st.line_chart(df_projecao.set_index('minuto')['under'])
             
             with col2:
-                st.write("**Over - Projeção Restante:**")
+                st.write("**Over - Evolução:**")
                 st.line_chart(df_projecao.set_index('minuto')['over'])
             
             # Tabela
-            st.subheader(f"📋 Tabela Restante - Min {minuto_atual + 1} ao 90")
+            st.subheader(f"📋 Projeção Restante - Min {minuto_atual + 1} ao 90")
             
             df_display = df_projecao[['minuto', 'under', 'over']].copy()
             df_display.columns = ['Minuto', 'Under', 'Over']
@@ -502,6 +607,6 @@ else:
 
 # Rodapé
 st.sidebar.markdown("---")
-st.sidebar.markdown("⚽ **Analisador v4.0 - ROBUSTO**")
-st.sidebar.markdown("🔒 **100% Monotônico**")
-st.sidebar.markdown("✅ **Curva Sempre Decrescente**")
+st.sidebar.markdown("⚽ **Analisador v5.0 - NATURAL**")
+st.sidebar.markdown("📊 **Curva Equilibrada**")
+st.sidebar.markdown("✅ **Segundo Tempo Ativo**")
